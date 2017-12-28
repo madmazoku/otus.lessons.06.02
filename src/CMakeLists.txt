@@ -11,6 +11,8 @@ set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_STATIC_RUNTIME ON)
 
 find_package(Boost COMPONENTS unit_test_framework program_options REQUIRED)
+find_package(Threads REQUIRED)
+find_package(SDL2 REQUIRED)
 
 set(CPACK_GENERATOR DEB)
 
@@ -49,7 +51,7 @@ set_target_properties(otus.lessons.06.02 otus.lessons.06.02_test PROPERTIES
 )
 
 target_link_libraries(otus.lessons.06.02
-    ${Boost_PROGRAM_OPTIONS_LIBRARY}
+    ${SDL2_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${Boost_PROGRAM_OPTIONS_LIBRARY}
 )
 
 target_link_libraries(otus.lessons.06.02_test
