@@ -11,7 +11,11 @@
 // dw/dt = (dq/dt, dp/dt) = (p, -q + gam * p)
 // (dx/dt, d^2x/dt^2)
 
+#include <deque>
+
+/*
 typedef std::vector<double> state_type;
+typedef std::list<state_type> states_type;
 
 constexpr double gam = 0.25;
 constexpr double t_step = 0.2;
@@ -59,3 +63,39 @@ void harmonic_solve()
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 }
+*/
+/*
+struct harm_osc {
+    typedef std::vector<double> state_type;
+    // struct state_type {
+    //     double x;
+    //     double v;
+    // };
+    // typedef std::list<state_type> states_type;
+
+    double gam;
+
+    harm_osc( double gam_ ) : gam(gam_) { }
+
+    void ode ( const state_type &s , state_type &dsdt , const double t )
+    {
+        // dsdt[0] = s[1];
+        // dsdt[1] = -s[0] - gam*s[1];
+        dsdt.x = s.v;
+        dsdt.v = -s.x - gam*s.v;
+    }
+
+    void solve()
+    {
+        harm_osc::state_type s;
+        // s[0] = 1.0;
+        // s[1] = 0.0;
+        s.x = 1.0;
+        s.v = 0.0;
+
+        auto lambda = [&]( const harm_osc::state_type &s , harm_osc::state_type &dsdt , const double t ) { ode(s, dsdt, t); };
+        size_t steps = boost::numeric::odeint::integrate(lambda, s, 0.0, 10.0, 0.1);
+    }
+};
+
+*/
