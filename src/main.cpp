@@ -11,6 +11,8 @@
 
 #include "solve.h"
 
+double sqr(double x) { return x*x; }
+
 void main_body();
 
 int main(int argc, char** argv) 
@@ -61,6 +63,7 @@ void main_body()
 
     long width = display_mode.w - 100;// >> 1;
     long height = display_mode.h >> 1;
+    width = height;
 
     SDL_Window *win = SDL_CreateWindow(
                           "Hellow World!",
@@ -83,83 +86,82 @@ void main_body()
         throw std::runtime_error("SDL_CreateRenderer");
     }
 
-    size_t cell_count = width-10;
-    double gam = 0.015;
-    double guk = 100;
-    double pond = 1e-5;
-    std::vector<double> state(2 * cell_count);
-    for(auto &s : state)
-        s = 0;
-    double s_max = state[0];
-    double s_min = s_max;
-    double v_max = state[1];
-    double v_min = v_max;
+    // d^2*u/dt^2 = c^2 * (d^2*u / dx^2 ) - mu * du / dt - pond
 
-    auto lambda = [cell_count, gam, guk, pond](const decltype(state) &s , decltype(state) &dsdt , const double t) 
-    {
-        for(size_t n = 1; n < cell_count - 1; ++n) {
-            dsdt[n * 2] = s[n * 2 + 1];
-            dsdt[n * 2 + 1] = -gam * s[n * 2 + 1] + guk * ((s[(n - 1) * 2] + s[(n + 1) * 2]) - 2*s[n * 2]) - pond;
-        }
-        size_t left_n = 0;
-        size_t right_n = cell_count - 1;
-        double left_s = 0;
-        double right_s = 0;
-        dsdt[left_n * 2] = s[left_n * 2 + 1];
-        dsdt[left_n * 2 + 1] = -gam * s[left_n * 2 + 1] + guk * ((left_s + s[(left_n + 1) * 2]) - 2*s[left_n * 2]) - pond;
-        dsdt[right_n * 2] = s[right_n * 2 + 1];
-        dsdt[right_n * 2 + 1] = -gam * s[right_n * 2 + 1] + guk * ((s[(right_n - 1) * 2] + right_s) - 2*s[right_n * 2]) - pond;
-    };
+    double mu = 0.00015;
+    double c = 10.0;
+    double p = 0; //1e-5;
+    double dt = 0.1;
+    double dh = 0.1;
+    double t = 0;
 
-    SDL_Point* points = new SDL_Point[cell_count];
+    size_t zoom = 5;
+    size_t zoom_t = 500;
+    double dhz = dh / zoom;
+    double dtz = dt / zoom_t;
+
+    double c2 = sqr(c * dtz / dhz);
+    double mu_dt = mu * dtz;
+    double dt2 = sqr(dtz);
+
+    double* state_prev = new double[width*zoom];
+    double* state_curr = new double[width*zoom];
+    double* state_next = new double[width*zoom];
+
+    memset(state_prev, 0, sizeof(double)*width*zoom);
+    memset(state_curr, 0, sizeof(double)*width*zoom);
+    memset(state_next, 0, sizeof(double)*width*zoom);
+
+    double s_max = 1.0;
+    double s_min = -1.0;
+
+    SDL_Point* points = new SDL_Point[width*zoom];
 
     auto start = std::chrono::system_clock::now();
+    double time_step = 0;
     size_t count = 0;
     auto last = start;
     size_t last_count = count;
-    double t = 0;
-    double time_step = 1.0 / 60.0;
     bool run = true;
+    bool calc = true;
     while (run) {
         auto loop_start = std::chrono::system_clock::now();
         ++count;
 
-        size_t steps = boost::numeric::odeint::integrate(lambda, state, t, t + 0.025 , time_step);
-        t += 0.025;
+        if(calc) {
+            for(size_t z = 0; z < zoom_t; ++z) {
+                for(size_t x = 1; x < width*zoom - 1; ++x) {
+                    double s = c2 * (state_curr[x - 1] + state_curr[x + 1] - 2 * state_curr[x]);
+                    state_next[x] = (2 - mu_dt) * state_curr[x] - (1 - mu_dt) * state_prev[x] - p * dt2 + s;
+                }
+
+                std::swap(state_prev, state_curr);
+                std::swap(state_curr, state_next);
+                t += dtz;
+            }
+        }
 
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0xff);
         SDL_RenderClear(renderer);
 
-        SDL_Rect rect;
-        rect.x = 5;
-        rect.y = 5;
-        rect.w = width - 10;
-        rect.h = height - 10;
-        SDL_SetRenderDrawColor(renderer, 0x7f, 0x7f, 0x7f, 0xff);
-        SDL_RenderDrawRect(renderer, &rect);
-
-        for(size_t n = 0; n < cell_count; ++n) {
-            if(s_max < state[n * 2])
-                s_max = state[n * 2];
-            if(v_max < state[n * 2 + 1])
-                v_max = state[n * 2 + 1];
-            if(s_min > state[n * 2])
-                s_min = state[n * 2];
-            if(v_min > state[n * 2 + 1])
-                v_min = state[n * 2 + 1];
+        for(size_t n = 1; n < width*zoom; ++n) {
+            if(s_max < state_curr[n])
+                s_max = state_curr[n];
+            if(s_min > state_curr[n])
+                s_min = state_curr[n];
         }
         if(s_max * s_min < 0) {
-            size_t y = s_max / (s_max - s_min) * (height - 10) + 5;
-            SDL_RenderDrawLine(renderer, 5, y, width-5, y);
+            size_t y = s_max / (s_max - s_min) * height;
+            SDL_RenderDrawLine(renderer, 0, y, width, y);
         }
 
-        {
-            for(size_t n = 0; n < cell_count; ++n) {
-                points[n].x = n + 5;
-                points[n].y = (s_max - state[n*2]) / (s_max - s_min) * (height - 10) + 5;
+        if(s_min != s_max) {
+            for(size_t n = 0; n < width * zoom; ++n) {
+                points[n].x = n / zoom;
+                points[n].y = (s_max - state_curr[n]) / (s_max - s_min) * height;
             }
             SDL_SetRenderDrawColor(renderer, 0xff, 0xff, 0xff, 0xff);
-            SDL_RenderDrawLines(renderer, points, cell_count);
+            SDL_RenderDrawLines(renderer, points, width*zoom);
         }
 
         SDL_RenderPresent(renderer);
@@ -172,6 +174,20 @@ void main_body()
                 || event.type == SDL_KEYDOWN
                 || event.type == SDL_KEYUP) {
                 run = false;
+            }
+            if(event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT && calc) {
+                double bx = event.button.x * zoom;
+                for(size_t n = 1; n < width*zoom - 1; ++n) {
+                    double d = bx < n ? (n - bx)*(-dhz) : (bx - n)*dhz;
+                    double e = exp(-sqr(d));
+                    state_prev[n] -= e;
+                    state_curr[n] -= e;
+
+                }
+                calc = false;
+            }
+            if(event.type == SDL_MOUSEBUTTONUP && event.button.button == SDL_BUTTON_LEFT) {
+                calc = true;
             }
         }
 
@@ -188,12 +204,16 @@ void main_body()
             SDL_SetWindowTitle(win, ("Hello World! FPS: " + boost::lexical_cast<std::string>(fps)).c_str());
 
             console->info("[{0} / {1}] fps: {2}; time_step: {3}; time: {4}; max: {5}; min: {6}", 
-                full_elapsed.count(), count, fps, time_step, t, v_max, v_min);
+                full_elapsed.count(), count, fps, time_step, t, s_max, s_min);
 
             last = end;
             last_count = count;
         }
     }
+
+    delete[] state_next;
+    delete[] state_curr;
+    delete[] state_prev;
 
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(win);
