@@ -41,6 +41,8 @@ int main(int argc, char** argv)
     return 0;
 }
 
+double sgn(double x) { return x < 0 ? -1 : x > 0 ? 1 : 0; }
+
 void main_body()
 {
     auto console = spdlog::get("console");
@@ -81,19 +83,35 @@ void main_body()
         throw std::runtime_error("SDL_CreateRenderer");
     }
 
-    std::vector<double> state(6);
-    state[0] = 0.0;
-    state[1] = 0.0;
-    state[2] = 0.0;
-    state[3] = 0.0;
-    state[4] = 3.0;
-    state[5] = 0.0;
-    std::deque<decltype(state)> states;
-    states.push_back(state);
-    double v_max = states[0][0];
+    size_t cell_count = width-10;
+    double gam = 0.015;
+    double guk = 100;
+    double pond = 1e-5;
+    std::vector<double> state(2 * cell_count);
+    for(auto &s : state)
+        s = 0;
+    double s_max = state[0];
+    double s_min = s_max;
+    double v_max = state[1];
     double v_min = v_max;
 
-    SDL_Point* points = new SDL_Point[width - 10];
+    auto lambda = [cell_count, gam, guk, pond](const decltype(state) &s , decltype(state) &dsdt , const double t) 
+    {
+        for(size_t n = 1; n < cell_count - 1; ++n) {
+            dsdt[n * 2] = s[n * 2 + 1];
+            dsdt[n * 2 + 1] = -gam * s[n * 2 + 1] + guk * ((s[(n - 1) * 2] + s[(n + 1) * 2]) - 2*s[n * 2]) - pond;
+        }
+        size_t left_n = 0;
+        size_t right_n = cell_count - 1;
+        double left_s = 0;
+        double right_s = 0;
+        dsdt[left_n * 2] = s[left_n * 2 + 1];
+        dsdt[left_n * 2 + 1] = -gam * s[left_n * 2 + 1] + guk * ((left_s + s[(left_n + 1) * 2]) - 2*s[left_n * 2]) - pond;
+        dsdt[right_n * 2] = s[right_n * 2 + 1];
+        dsdt[right_n * 2 + 1] = -gam * s[right_n * 2 + 1] + guk * ((s[(right_n - 1) * 2] + right_s) - 2*s[right_n * 2]) - pond;
+    };
+
+    SDL_Point* points = new SDL_Point[cell_count];
 
     auto start = std::chrono::system_clock::now();
     size_t count = 0;
@@ -106,37 +124,10 @@ void main_body()
         auto loop_start = std::chrono::system_clock::now();
         ++count;
 
-        auto lambda = [](const decltype(state) &s , decltype(state) &dsdt , const double t) 
-        {
-            dsdt[0] = s[1];
-            dsdt[1] = (s[2] - 2*s[0] - 0.05 * s[1]);
-            dsdt[2] = s[3];
-            dsdt[3] = (s[0] + s[4] - 2*s[2] - 0.05 * s[3]);
-            dsdt[4] = s[5];
-            dsdt[5] = (s[2] - s[4] - 0.05 * s[5]);
-        };
-        if(states.size() < width - 10) {
-            size_t steps = boost::numeric::odeint::integrate(lambda, state, t, t + 0.025 , time_step);
-            t += 0.025;
-            if(v_max < state[0])
-                v_max = state[0];
-            if(v_max < state[2])
-                v_max = state[2];
-            if(v_max < state[4])
-                v_max = state[4];
-            if(v_min > state[0])
-                v_min = state[0];
-            if(v_min > state[2])
-                v_min = state[2];
-            if(v_min > state[4])
-                v_min = state[4];
-            states.push_back(state);
-        }
+        size_t steps = boost::numeric::odeint::integrate(lambda, state, t, t + 0.025 , time_step);
+        t += 0.025;
 
-        while(states.size() > width - 10)
-            states.pop_front();
-
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0xff);
         SDL_RenderClear(renderer);
 
         SDL_Rect rect;
@@ -144,44 +135,31 @@ void main_body()
         rect.y = 5;
         rect.w = width - 10;
         rect.h = height - 10;
-        SDL_SetRenderDrawColor(renderer, 0x7f, 0x7f, 0x7f, 255);
+        SDL_SetRenderDrawColor(renderer, 0x7f, 0x7f, 0x7f, 0xff);
         SDL_RenderDrawRect(renderer, &rect);
-        if(v_max * v_min < 0) {
-            size_t y = v_max / (v_max - v_min) * (height - 10) + 5;
+
+        for(size_t n = 0; n < cell_count; ++n) {
+            if(s_max < state[n * 2])
+                s_max = state[n * 2];
+            if(v_max < state[n * 2 + 1])
+                v_max = state[n * 2 + 1];
+            if(s_min > state[n * 2])
+                s_min = state[n * 2];
+            if(v_min > state[n * 2 + 1])
+                v_min = state[n * 2 + 1];
+        }
+        if(s_max * s_min < 0) {
+            size_t y = s_max / (s_max - s_min) * (height - 10) + 5;
             SDL_RenderDrawLine(renderer, 5, y, width-5, y);
         }
 
         {
-            size_t n = 0;
-            for(const auto &s : states) {
+            for(size_t n = 0; n < cell_count; ++n) {
                 points[n].x = n + 5;
-                points[n].y = (v_max - s[0]) / (v_max - v_min) * (height - 10) + 5;
-                ++n;
+                points[n].y = (s_max - state[n*2]) / (s_max - s_min) * (height - 10) + 5;
             }
-            SDL_SetRenderDrawColor(renderer, 0xff, 0x00, 0x00, 255);
-            SDL_RenderDrawLines(renderer, points, states.size());
-        }
-
-        {
-            size_t n = 0;
-            for(const auto &s : states) {
-                points[n].x = n + 5;
-                points[n].y = (v_max - s[2]) / (v_max - v_min) * (height - 10) + 5;
-                ++n;
-            }
-            SDL_SetRenderDrawColor(renderer, 0x00, 0xff, 0x00, 255);
-            SDL_RenderDrawLines(renderer, points, states.size());
-        }
-
-        {
-            size_t n = 0;
-            for(const auto &s : states) {
-                points[n].x = n + 5;
-                points[n].y = (v_max - s[4]) / (v_max - v_min) * (height - 10) + 5;
-                ++n;
-            }
-            SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0xff, 255);
-            SDL_RenderDrawLines(renderer, points, states.size());
+            SDL_SetRenderDrawColor(renderer, 0xff, 0xff, 0xff, 0xff);
+            SDL_RenderDrawLines(renderer, points, cell_count);
         }
 
         SDL_RenderPresent(renderer);
@@ -209,8 +187,8 @@ void main_body()
 
             SDL_SetWindowTitle(win, ("Hello World! FPS: " + boost::lexical_cast<std::string>(fps)).c_str());
 
-            console->info("[{0} / {1}] fps: {2}; time_step: {3}; time: {4}", 
-                full_elapsed.count(), count, fps, time_step, t);
+            console->info("[{0} / {1}] fps: {2}; time_step: {3}; time: {4}; max: {5}; min: {6}", 
+                full_elapsed.count(), count, fps, time_step, t, v_max, v_min);
 
             last = end;
             last_count = count;
